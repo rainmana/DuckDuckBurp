@@ -28,6 +28,7 @@ public class SettingsTab {
     private final JPasswordField keyField;
     private final JTextField   modelField;
     private final JLabel       statusLabel;
+    private final JLabel       burpAiStatusLabel;
 
     public SettingsTab(Preferences prefs, Ai burpAi) {
         this.prefs    = prefs;
@@ -36,6 +37,16 @@ public class SettingsTab {
 
         panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createEmptyBorder(14, 14, 14, 14));
+
+        // ── Burp AI live status ───────────────────────────────────────────────
+        burpAiStatusLabel = new JLabel();
+        JButton refreshStatusBtn = new JButton("Refresh");
+        refreshStatusBtn.addActionListener(e -> updateBurpAiStatus());
+        JPanel burpStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        burpStatusPanel.setBorder(BorderFactory.createTitledBorder("Burp AI Status"));
+        burpStatusPanel.add(burpAiStatusLabel);
+        burpStatusPanel.add(refreshStatusBtn);
+        updateBurpAiStatus();
 
         // ── Backend selector ──────────────────────────────────────────────────
         burpRadio   = new JRadioButton("Burp AI  (uses your Burp AI credits)");
@@ -96,6 +107,8 @@ public class SettingsTab {
         // ── Assemble ──────────────────────────────────────────────────────────
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.add(burpStatusPanel);
+        content.add(Box.createVerticalStrut(6));
         content.add(radioPanel);
         content.add(Box.createVerticalStrut(10));
         content.add(formPanel);
@@ -134,6 +147,18 @@ public class SettingsTab {
     public Component uiComponent() { return panel; }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private void updateBurpAiStatus() {
+        boolean enabled = burpAi.isEnabled();
+        if (enabled) {
+            burpAiStatusLabel.setText("isEnabled() = true  ✓  Burp AI is ready");
+            burpAiStatusLabel.setForeground(new Color(0, 128, 0));
+        } else {
+            burpAiStatusLabel.setText(
+                    "isEnabled() = false  —  Go to Burp menu > Settings > AI and check that AI is turned on and this extension is allowed to use it");
+            burpAiStatusLabel.setForeground(Color.RED.darker());
+        }
+    }
 
     private void updateFormEnabled() {
         boolean custom = customRadio.isSelected();

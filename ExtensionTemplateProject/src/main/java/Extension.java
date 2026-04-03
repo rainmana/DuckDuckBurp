@@ -48,6 +48,7 @@ public class Extension implements BurpExtension {
             });
 
             montoyaApi.logging().logToOutput("DuckDuckBurp loaded. DB: " + dbPath);
+            montoyaApi.logging().logToOutput("Burp AI enabled: " + montoyaApi.ai().isEnabled());
 
         } catch (Exception e) {
             montoyaApi.logging().logToError("DuckDuckBurp failed to initialize: " + e.getMessage());
