@@ -32,7 +32,76 @@ public class DuckDbManager {
                     resp_length INTEGER
                 )
                 """);
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS saved_queries (
+                    id         INTEGER PRIMARY KEY,
+                    category   VARCHAR NOT NULL,
+                    name       VARCHAR NOT NULL,
+                    sql_text   VARCHAR NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+                """);
         }
+    }
+
+    // ── Saved queries ─────────────────────────────────────────────────────────
+
+    public record SavedQuery(long id, String category, String name, String sql) {
+        @Override public String toString() { return name; }
+    }
+
+    public synchronized void saveQuery(String category, String name, String sqlText) throws SQLException {
+        String sql = """
+            INSERT INTO saved_queries (id, category, name, sql_text)
+            SELECT COALESCE(MAX(id), 0) + 1, ?, ?, ?
+            FROM saved_queries
+            """;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, category);
+            ps.setString(2, name);
+            ps.setString(3, sqlText);
+            ps.executeUpdate();
+        }
+    }
+
+    public synchronized List<SavedQuery> loadSavedQueries() throws SQLException {
+        QueryResult result = query("""
+            SELECT id, category, name, sql_text
+            FROM saved_queries
+            ORDER BY category, name
+            """);
+        List<SavedQuery> list = new ArrayList<>();
+        for (Object[] row : result.rows()) {
+            list.add(new SavedQuery(
+                ((Number) row[0]).longValue(),
+                String.valueOf(row[1]),
+                String.valueOf(row[2]),
+                String.valueOf(row[3])
+            ));
+        }
+        return list;
+    }
+
+    public synchronized void deleteSavedQuery(long id) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "DELETE FROM saved_queries WHERE id = ?")) {
+            ps.setLong(1, id);
+            ps.executeUpdate();
+        }
+    }
+
+    public synchronized void exportSavedQueries(String path) throws SQLException {
+        execute("COPY (SELECT category, name, sql_text FROM saved_queries ORDER BY category, name) "
+                + "TO '" + path + "' (FORMAT JSON)");
+    }
+
+    public synchronized void importSavedQueries(String path) throws SQLException {
+        execute("""
+            INSERT INTO saved_queries (id, category, name, sql_text)
+            SELECT (SELECT COALESCE(MAX(id), 0) FROM saved_queries)
+                   + row_number() OVER () AS id,
+                   category, name, sql_text
+            FROM read_json_auto('""" + path + "')");
     }
 
     public synchronized void insertTraffic(

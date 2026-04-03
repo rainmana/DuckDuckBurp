@@ -2,11 +2,12 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeCellRenderer;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 public class QueryTab {
 
@@ -20,6 +21,7 @@ public class QueryTab {
     private final JLabel statusLabel;
     private final JTextArea requestArea;
     private final JTextArea responseArea;
+    private final QueriesSidebar sidebar;
 
     public QueryTab(DuckDbManager db) {
         this.db = db;
@@ -40,12 +42,14 @@ public class QueryTab {
         inputScroll.setBorder(BorderFactory.createTitledBorder("SQL Query (Ctrl+Enter to run)"));
 
         // --- Toolbar ---
-        JButton runButton  = new JButton("Run Query");
+        JButton runButton    = new JButton("Run Query");
         JButton exportButton = new JButton("Export...");
+        JButton saveButton   = new JButton("Save Query...");
         statusLabel = new JLabel(" ");
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         toolbar.add(runButton);
         toolbar.add(exportButton);
+        toolbar.add(saveButton);
         toolbar.add(statusLabel);
 
         JPanel topPanel = new JPanel(new BorderLayout(0, 4));
@@ -83,12 +87,11 @@ public class QueryTab {
         contentPanel.add(topPanel, BorderLayout.NORTH);
         contentPanel.add(vertSplit, BorderLayout.CENTER);
 
-        // --- Canned queries sidebar ---
-        JScrollPane sidebar = new JScrollPane(buildTree());
-        sidebar.setBorder(BorderFactory.createTitledBorder("Canned Queries"));
+        // --- Queries sidebar (canned + saved) ---
+        sidebar = new QueriesSidebar(db, sql -> { queryInput.setText(sql); runQuery(); });
 
         // --- Outer split: sidebar | content ---
-        JSplitPane outerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebar, contentPanel);
+        JSplitPane outerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebar.uiComponent(), contentPanel);
         outerSplit.setDividerLocation(220);
         outerSplit.setOneTouchExpandable(true);
 
@@ -97,6 +100,7 @@ public class QueryTab {
         // --- Actions ---
         runButton.addActionListener(e -> runQuery());
         exportButton.addActionListener(e -> exportResults());
+        saveButton.addActionListener(e -> showSaveDialog());
 
         queryInput.getInputMap().put(KeyStroke.getKeyStroke("ctrl ENTER"), "runQuery");
         queryInput.getActionMap().put("runQuery", new AbstractAction() {
@@ -106,54 +110,51 @@ public class QueryTab {
         resultsTable.getSelectionModel().addListSelectionListener(this::onRowSelected);
     }
 
-    private JTree buildTree() {
-        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Canned Queries");
-
-        for (CannedQueries.Category cat : CannedQueries.ALL) {
-            DefaultMutableTreeNode catNode = new DefaultMutableTreeNode(cat);
-            for (CannedQueries.Query q : cat.queries()) {
-                catNode.add(new DefaultMutableTreeNode(q));
-            }
-            root.add(catNode);
+    private void showSaveDialog() {
+        String sql = queryInput.getText().trim();
+        if (sql.isEmpty()) {
+            JOptionPane.showMessageDialog(panel, "Write a query first.", "Save Query", JOptionPane.WARNING_MESSAGE);
+            return;
         }
 
-        JTree tree = new JTree(root);
-        tree.setRootVisible(false);
-        tree.setShowsRootHandles(true);
+        JTextField nameField = new JTextField(28);
 
-        // Style: bold categories, plain query names, no icons on leaves
-        tree.setCellRenderer(new DefaultTreeCellRenderer() {
-            @Override
-            public Component getTreeCellRendererComponent(
-                    JTree t, Object value, boolean sel, boolean expanded,
-                    boolean leaf, int row, boolean hasFocus) {
-                super.getTreeCellRendererComponent(t, value, sel, expanded, leaf, row, hasFocus);
-                Object userObj = ((DefaultMutableTreeNode) value).getUserObject();
-                if (userObj instanceof CannedQueries.Category) {
-                    setFont(getFont().deriveFont(Font.BOLD));
-                    setIcon(null);
-                } else if (userObj instanceof CannedQueries.Query) {
-                    setFont(getFont().deriveFont(Font.PLAIN));
-                    setIcon(null);
-                }
-                return this;
+        List<String> existingCats;
+        try {
+            existingCats = db.loadSavedQueries().stream()
+                    .map(DuckDbManager.SavedQuery::category)
+                    .distinct().sorted().collect(Collectors.toList());
+        } catch (Exception e) {
+            existingCats = new ArrayList<>();
+        }
+        JComboBox<String> categoryBox = new JComboBox<>(existingCats.toArray(new String[0]));
+        categoryBox.setEditable(true);
+        if (categoryBox.getItemCount() == 0) categoryBox.setSelectedItem("My Queries");
+
+        JPanel form = new JPanel(new java.awt.GridLayout(2, 2, 5, 5));
+        form.add(new JLabel("Name:"));     form.add(nameField);
+        form.add(new JLabel("Category:")); form.add(categoryBox);
+
+        int result = JOptionPane.showConfirmDialog(panel, form, "Save Query",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) return;
+
+        String name = nameField.getText().trim();
+        String category = String.valueOf(categoryBox.getSelectedItem()).trim();
+        if (name.isEmpty() || category.isEmpty()) {
+            JOptionPane.showMessageDialog(panel, "Name and category are required.", "Save Query", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                db.saveQuery(category, name, sql);
+                sidebar.refresh();
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(panel, ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE));
             }
-        });
-
-        // Expand all category nodes
-        for (int i = 0; i < tree.getRowCount(); i++) tree.expandRow(i);
-
-        tree.addTreeSelectionListener(e -> {
-            DefaultMutableTreeNode node =
-                    (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
-            if (node == null || !node.isLeaf()) return;
-            if (node.getUserObject() instanceof CannedQueries.Query q) {
-                queryInput.setText(q.sql().strip());
-                runQuery();
-            }
-        });
-
-        return tree;
+        }, "DuckDuckBurp-save-query").start();
     }
 
     private void runQuery() {

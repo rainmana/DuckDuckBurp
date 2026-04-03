@@ -159,6 +159,82 @@ class DuckDbManagerTest {
         assertThrows(Exception.class, () -> db.execute("NOT VALID SQL AT ALL"));
     }
 
+    // ── Saved queries ─────────────────────────────────────────────────────────
+
+    @Test
+    void saveQueryPersistsRow() throws Exception {
+        db.saveQuery("Testing", "My Query", "SELECT 1");
+        List<DuckDbManager.SavedQuery> saved = db.loadSavedQueries();
+        assertEquals(1, saved.size());
+        assertEquals("Testing",  saved.get(0).category());
+        assertEquals("My Query", saved.get(0).name());
+        assertEquals("SELECT 1", saved.get(0).sql());
+    }
+
+    @Test
+    void loadSavedQueriesOrderedByCategoryThenName() throws Exception {
+        db.saveQuery("Zeta", "Z Query",  "SELECT 3");
+        db.saveQuery("Alpha", "B Query", "SELECT 2");
+        db.saveQuery("Alpha", "A Query", "SELECT 1");
+
+        List<DuckDbManager.SavedQuery> saved = db.loadSavedQueries();
+        assertEquals(3, saved.size());
+        assertEquals("Alpha", saved.get(0).category());
+        assertEquals("A Query", saved.get(0).name());
+        assertEquals("Alpha", saved.get(1).category());
+        assertEquals("B Query", saved.get(1).name());
+        assertEquals("Zeta", saved.get(2).category());
+    }
+
+    @Test
+    void deleteSavedQueryRemovesOnlyThatRow() throws Exception {
+        db.saveQuery("Cat", "Keep",   "SELECT 1");
+        db.saveQuery("Cat", "Delete", "SELECT 2");
+
+        List<DuckDbManager.SavedQuery> before = db.loadSavedQueries();
+        assertEquals(2, before.size());
+        long deleteId = before.stream()
+                .filter(q -> q.name().equals("Delete"))
+                .findFirst().orElseThrow().id();
+
+        db.deleteSavedQuery(deleteId);
+
+        List<DuckDbManager.SavedQuery> after = db.loadSavedQueries();
+        assertEquals(1, after.size());
+        assertEquals("Keep", after.get(0).name());
+    }
+
+    @Test
+    void savedQueryIdsAreUniqueAcrossInserts() throws Exception {
+        db.saveQuery("Cat", "Q1", "SELECT 1");
+        db.saveQuery("Cat", "Q2", "SELECT 2");
+        db.saveQuery("Cat", "Q3", "SELECT 3");
+
+        List<DuckDbManager.SavedQuery> saved = db.loadSavedQueries();
+        long distinctIds = saved.stream().map(DuckDbManager.SavedQuery::id).distinct().count();
+        assertEquals(3, distinctIds, "each saved query should have a unique id");
+    }
+
+    @Test
+    void exportAndImportSavedQueriesRoundTrip(@TempDir Path tempDir) throws Exception {
+        db.saveQuery("Recon", "All Hosts",  "SELECT host FROM traffic GROUP BY host");
+        db.saveQuery("Auth",  "Auth Fails", "SELECT * FROM traffic WHERE status_code = 401");
+
+        Path file = tempDir.resolve("queries.json");
+        db.exportSavedQueries(file.toString());
+        assertTrue(Files.exists(file), "export file should be created");
+
+        // Import into a fresh DB
+        DuckDbManager db2 = new DuckDbManager("");
+        db2.importSavedQueries(file.toString());
+        List<DuckDbManager.SavedQuery> imported = db2.loadSavedQueries();
+        db2.close();
+
+        assertEquals(2, imported.size());
+        assertTrue(imported.stream().anyMatch(q -> q.name().equals("All Hosts")));
+        assertTrue(imported.stream().anyMatch(q -> q.name().equals("Auth Fails")));
+    }
+
     // --- helpers ---
 
     private int columnIndex(String[] columns, String name) {
