@@ -20,10 +20,13 @@ public class Extension implements BurpExtension {
             TrafficHandler handler = new TrafficHandler(db, montoyaApi.logging());
             DashboardTab dashboard = new DashboardTab(db);
             QueryTab queryTab = new QueryTab(db);
+            AiBackend aiBackend = new BurpAiBackend(montoyaApi.ai());
+            AiTab aiTab = new AiTab(db, aiBackend);
 
             JTabbedPane tabbedPane = new JTabbedPane();
             tabbedPane.addTab("Dashboard", dashboard.uiComponent());
             tabbedPane.addTab("Query", queryTab.uiComponent());
+            tabbedPane.addTab("AI Analyst", aiTab.uiComponent());
 
             montoyaApi.proxy().registerResponseHandler(handler);
             montoyaApi.userInterface().registerSuiteTab("DuckDuckBurp", tabbedPane);
