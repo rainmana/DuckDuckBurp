@@ -2,6 +2,8 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.File;
@@ -38,7 +40,7 @@ public class QueryTab {
         inputScroll.setBorder(BorderFactory.createTitledBorder("SQL Query (Ctrl+Enter to run)"));
 
         // --- Toolbar ---
-        JButton runButton = new JButton("Run Query");
+        JButton runButton  = new JButton("Run Query");
         JButton exportButton = new JButton("Export...");
         statusLabel = new JLabel(" ");
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
@@ -48,14 +50,11 @@ public class QueryTab {
 
         JPanel topPanel = new JPanel(new BorderLayout(0, 4));
         topPanel.add(inputScroll, BorderLayout.CENTER);
-        topPanel.add(toolbar, BorderLayout.SOUTH);
+        topPanel.add(toolbar,     BorderLayout.SOUTH);
 
         // --- Results table ---
         tableModel = new DefaultTableModel() {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
+            @Override public boolean isCellEditable(int row, int col) { return false; }
         };
         resultsTable = new JTable(tableModel);
         resultsTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
@@ -66,21 +65,34 @@ public class QueryTab {
         tableScroll.setBorder(BorderFactory.createTitledBorder("Results"));
 
         // --- Detail view ---
-        requestArea = makeDetailArea();
+        requestArea  = makeDetailArea();
         responseArea = makeDetailArea();
 
         JTabbedPane detailPane = new JTabbedPane();
-        detailPane.addTab("Request", new JScrollPane(requestArea));
+        detailPane.addTab("Request",  new JScrollPane(requestArea));
         detailPane.addTab("Response", new JScrollPane(responseArea));
         detailPane.setBorder(BorderFactory.createTitledBorder("Detail"));
 
         // --- Split: results (top) / detail (bottom) ---
-        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tableScroll, detailPane);
-        splitPane.setResizeWeight(0.6);
-        splitPane.setOneTouchExpandable(true);
+        JSplitPane vertSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tableScroll, detailPane);
+        vertSplit.setResizeWeight(0.6);
+        vertSplit.setOneTouchExpandable(true);
 
-        panel.add(topPanel, BorderLayout.NORTH);
-        panel.add(splitPane, BorderLayout.CENTER);
+        // --- Content area (editor + results + detail) ---
+        JPanel contentPanel = new JPanel(new BorderLayout(5, 5));
+        contentPanel.add(topPanel, BorderLayout.NORTH);
+        contentPanel.add(vertSplit, BorderLayout.CENTER);
+
+        // --- Canned queries sidebar ---
+        JScrollPane sidebar = new JScrollPane(buildTree());
+        sidebar.setBorder(BorderFactory.createTitledBorder("Canned Queries"));
+
+        // --- Outer split: sidebar | content ---
+        JSplitPane outerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebar, contentPanel);
+        outerSplit.setDividerLocation(220);
+        outerSplit.setOneTouchExpandable(true);
+
+        panel.add(outerSplit, BorderLayout.CENTER);
 
         // --- Actions ---
         runButton.addActionListener(e -> runQuery());
@@ -88,13 +100,60 @@ public class QueryTab {
 
         queryInput.getInputMap().put(KeyStroke.getKeyStroke("ctrl ENTER"), "runQuery");
         queryInput.getActionMap().put("runQuery", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { runQuery(); }
+        });
+
+        resultsTable.getSelectionModel().addListSelectionListener(this::onRowSelected);
+    }
+
+    private JTree buildTree() {
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Canned Queries");
+
+        for (CannedQueries.Category cat : CannedQueries.ALL) {
+            DefaultMutableTreeNode catNode = new DefaultMutableTreeNode(cat);
+            for (CannedQueries.Query q : cat.queries()) {
+                catNode.add(new DefaultMutableTreeNode(q));
+            }
+            root.add(catNode);
+        }
+
+        JTree tree = new JTree(root);
+        tree.setRootVisible(false);
+        tree.setShowsRootHandles(true);
+
+        // Style: bold categories, plain query names, no icons on leaves
+        tree.setCellRenderer(new DefaultTreeCellRenderer() {
             @Override
-            public void actionPerformed(ActionEvent e) {
+            public Component getTreeCellRendererComponent(
+                    JTree t, Object value, boolean sel, boolean expanded,
+                    boolean leaf, int row, boolean hasFocus) {
+                super.getTreeCellRendererComponent(t, value, sel, expanded, leaf, row, hasFocus);
+                Object userObj = ((DefaultMutableTreeNode) value).getUserObject();
+                if (userObj instanceof CannedQueries.Category) {
+                    setFont(getFont().deriveFont(Font.BOLD));
+                    setIcon(null);
+                } else if (userObj instanceof CannedQueries.Query) {
+                    setFont(getFont().deriveFont(Font.PLAIN));
+                    setIcon(null);
+                }
+                return this;
+            }
+        });
+
+        // Expand all category nodes
+        for (int i = 0; i < tree.getRowCount(); i++) tree.expandRow(i);
+
+        tree.addTreeSelectionListener(e -> {
+            DefaultMutableTreeNode node =
+                    (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
+            if (node == null || !node.isLeaf()) return;
+            if (node.getUserObject() instanceof CannedQueries.Query q) {
+                queryInput.setText(q.sql().strip());
                 runQuery();
             }
         });
 
-        resultsTable.getSelectionModel().addListSelectionListener(this::onRowSelected);
+        return tree;
     }
 
     private void runQuery() {
@@ -111,9 +170,7 @@ public class QueryTab {
                 DuckDbManager.QueryResult result = db.query(sql);
                 SwingUtilities.invokeLater(() -> {
                     tableModel.setColumnIdentifiers(result.columns());
-                    for (Object[] row : result.rows()) {
-                        tableModel.addRow(row);
-                    }
+                    for (Object[] row : result.rows()) tableModel.addRow(row);
                     statusLabel.setText(result.rows().size() + " row(s)");
                 });
             } catch (Exception ex) {
@@ -149,19 +206,12 @@ public class QueryTab {
                 );
                 if (result.rows().isEmpty()) return;
                 Object[] r = result.rows().get(0);
-                String reqHeaders  = nullToEmpty(r[0]);
-                String reqBody     = nullToEmpty(r[1]);
-                String respHeaders = nullToEmpty(r[2]);
-                String respBody    = nullToEmpty(r[3]);
-
-                String reqText  = formatMessage(reqHeaders, reqBody);
-                String respText = formatMessage(respHeaders, respBody);
+                String reqText  = formatMessage(nullToEmpty(r[0]), nullToEmpty(r[1]));
+                String respText = formatMessage(nullToEmpty(r[2]), nullToEmpty(r[3]));
 
                 SwingUtilities.invokeLater(() -> {
-                    requestArea.setText(reqText);
-                    requestArea.setCaretPosition(0);
-                    responseArea.setText(respText);
-                    responseArea.setCaretPosition(0);
+                    requestArea.setText(reqText);   requestArea.setCaretPosition(0);
+                    responseArea.setText(respText); responseArea.setCaretPosition(0);
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
@@ -180,28 +230,24 @@ public class QueryTab {
         String[] formats = {"CSV", "JSON", "Parquet"};
         String format = (String) JOptionPane.showInputDialog(
                 panel, "Export format:", "Export Results",
-                JOptionPane.PLAIN_MESSAGE, null, formats, "CSV"
-        );
+                JOptionPane.PLAIN_MESSAGE, null, formats, "CSV");
         if (format == null) return;
 
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Save export as...");
-        String ext = format.toLowerCase().replace("parquet", "parquet");
+        String ext = format.toLowerCase();
         chooser.setFileFilter(new FileNameExtensionFilter(format + " files", ext));
         chooser.setSelectedFile(new File("traffic." + ext));
-
         if (chooser.showSaveDialog(panel) != JFileChooser.APPROVE_OPTION) return;
-        String path = chooser.getSelectedFile().getAbsolutePath();
 
+        String path = chooser.getSelectedFile().getAbsolutePath();
         String copyOptions = switch (format) {
             case "JSON"    -> "(FORMAT JSON)";
             case "Parquet" -> "(FORMAT PARQUET)";
             default        -> "(FORMAT CSV, HEADER true)";
         };
-
-        // Strip trailing semicolon before wrapping in COPY
         String innerSql = sql.replaceAll(";\\s*$", "");
-        String copySql = "COPY (" + innerSql + ") TO '" + path.replace("'", "\\'") + "' " + copyOptions;
+        String copySql  = "COPY (" + innerSql + ") TO '" + path.replace("'", "\\'") + "' " + copyOptions;
 
         statusLabel.setText("Exporting...");
         new Thread(() -> {
@@ -240,9 +286,7 @@ public class QueryTab {
         return -1;
     }
 
-    private String nullToEmpty(Object o) {
-        return o == null ? "" : o.toString();
-    }
+    private String nullToEmpty(Object o) { return o == null ? "" : o.toString(); }
 
     private String formatMessage(String headers, String body) {
         if (headers.isEmpty() && body.isEmpty()) return "";
@@ -250,7 +294,5 @@ public class QueryTab {
         return headers + "\r\n\r\n" + body;
     }
 
-    public Component uiComponent() {
-        return panel;
-    }
+    public Component uiComponent() { return panel; }
 }

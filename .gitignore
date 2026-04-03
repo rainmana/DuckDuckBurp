@@ -1,0 +1,17 @@
+# Build output
+ExtensionTemplateProject/build/
+ExtensionTemplateProject/.gradle/
+
+# Test export artifacts
+exported_files_tests/
+
+# macOS
+.DS_Store
+
+# Java
+*.class
+
+# IntelliJ / VSCode
+.idea/
+*.iml
+.vscode/
