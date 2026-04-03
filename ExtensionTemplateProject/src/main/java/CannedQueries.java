@@ -152,6 +152,117 @@ public class CannedQueries {
                 """)
         )),
 
+        new Category("OWASP Top 10", List.of(
+            new Query("A01 – Broken Access Control (mixed auth paths)", """
+                SELECT path,
+                       COUNT(CASE WHEN status_code = 200         THEN 1 END) AS ok_200,
+                       COUNT(CASE WHEN status_code IN (401,403)  THEN 1 END) AS denied
+                FROM traffic
+                GROUP BY path
+                HAVING ok_200 > 0 AND denied > 0
+                ORDER BY denied DESC
+                """),
+            new Query("A01 – Privileged Paths Returning 200", """
+                SELECT id, host, method, path, status_code
+                FROM traffic
+                WHERE status_code = 200
+                  AND regexp_extract(lower(path),
+                      'admin|manager|superuser|root|internal|private|restricted|staff|moderator') <> ''
+                ORDER BY host, path
+                LIMIT 50
+                """),
+            new Query("A02 – Sensitive Data Over Plain HTTP", """
+                SELECT id, host, method, path, status_code
+                FROM traffic
+                WHERE protocol = 'http'
+                  AND regexp_extract(lower(path || coalesce(req_body, '')),
+                      'password|passwd|secret|token|apikey|api_key|credential|ssn|credit') <> ''
+                ORDER BY id DESC
+                LIMIT 50
+                """),
+            new Query("A03 – Injection Patterns in Requests", """
+                SELECT id, host, method, path, req_body
+                FROM traffic
+                WHERE regexp_extract(lower(path || ' ' || coalesce(req_body, '')),
+                    'union.{0,20}select|drop.{0,5}table|exec.{0,5}\\(|<script|javascript:') <> ''
+                LIMIT 50
+                """),
+            new Query("A05 – Exposed Debug / Config Endpoints", """
+                SELECT id, host, method, path, status_code
+                FROM traffic
+                WHERE status_code = 200
+                  AND regexp_extract(lower(path),
+                      '\\.env|phpinfo|server-status|actuator|swagger|/api-docs|/openapi|/metrics|/health|debug|trace') <> ''
+                ORDER BY host, path
+                LIMIT 50
+                """),
+            new Query("A07 – Auth Failure Hotspots (brute force?)", """
+                SELECT host, path, COUNT(*) AS failures
+                FROM traffic
+                WHERE status_code IN (401, 403)
+                GROUP BY host, path
+                HAVING COUNT(*) >= 3
+                ORDER BY failures DESC
+                """),
+            new Query("A10 – SSRF / Internal URL Indicators", """
+                SELECT id, host, method, path, req_body
+                FROM traffic
+                WHERE regexp_extract(path || ' ' || coalesce(req_body, ''),
+                    '192\\.168\\.|10\\.[0-9]+\\.|172\\.1[6-9]\\.|127\\.0|localhost|file://|dict://|gopher://') <> ''
+                LIMIT 50
+                """)
+        )),
+
+        new Category("CWE Web", List.of(
+            new Query("CWE-79: XSS – Script Patterns in Input", """
+                SELECT id, host, method, path, req_body
+                FROM traffic
+                WHERE regexp_extract(lower(coalesce(req_body, '') || ' ' || path),
+                    '<script|javascript:|onerror=|onload=|alert\\(|eval\\(|document\\.cookie') <> ''
+                LIMIT 50
+                """),
+            new Query("CWE-89: SQL Injection – Common Payloads", """
+                SELECT id, host, method, path, req_body
+                FROM traffic
+                WHERE regexp_extract(lower(coalesce(req_body, '') || ' ' || path),
+                    'union.{0,15}select|or.{0,5}1.{0,3}=.{0,3}1|drop.{0,5}table|; *--') <> ''
+                LIMIT 50
+                """),
+            new Query("CWE-22: Path Traversal Sequences", """
+                SELECT id, host, method, path, status_code
+                FROM traffic
+                WHERE path LIKE '%../%'
+                   OR lower(path) LIKE '%2e2e%'
+                   OR regexp_extract(lower(path), '\\.\\.' || '%2f' || '|\\.\\.' || '%5c') <> ''
+                ORDER BY id DESC
+                LIMIT 50
+                """),
+            new Query("CWE-352: POST/PUT/DELETE without CSRF Token", """
+                SELECT id, host, method, path, req_headers
+                FROM traffic
+                WHERE method IN ('POST', 'PUT', 'DELETE', 'PATCH')
+                  AND lower(req_headers::VARCHAR) NOT LIKE '%csrf%'
+                  AND lower(req_headers::VARCHAR) NOT LIKE '%xsrf%'
+                ORDER BY id DESC
+                LIMIT 50
+                """),
+            new Query("CWE-601: Open Redirect Parameters", """
+                SELECT id, host, method, path, status_code
+                FROM traffic
+                WHERE regexp_extract(lower(path),
+                    'redirect=|url=|next=|return=|rurl=|dest=|target=|forward=|goto=') <> ''
+                ORDER BY id DESC
+                LIMIT 50
+                """),
+            new Query("CWE-918: SSRF – Server-Side URL Parameters", """
+                SELECT id, host, method, path, req_body
+                FROM traffic
+                WHERE regexp_extract(lower(path || ' ' || coalesce(req_body, '')),
+                    'ssrf|internal|intranet|192\\.168\\.|10\\.[0-9]+\\.|127\\.0|localhost|file://|dict://') <> ''
+                LIMIT 50
+                """)
+        )),
+
         new Category("Security", List.of(
             new Query("Interesting Paths", """
                 SELECT id, host, method, path, status_code

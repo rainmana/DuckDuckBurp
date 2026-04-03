@@ -29,7 +29,8 @@ public class Extension implements BurpExtension {
             QueryTab queryTab = new QueryTab(db);
             SettingsTab settingsTab = new SettingsTab(
                     montoyaApi.persistence().preferences(), montoyaApi.ai());
-            AiTab aiTab = new AiTab(db, settingsTab::getCurrentBackend);
+            AiTab aiTab = new AiTab(db, settingsTab::getCurrentBackend,
+                    queryTab::runSql, queryTab::refreshSidebar);
 
             JTabbedPane tabbedPane = new JTabbedPane();
             tabbedPane.addTab("Dashboard",    dashboard.uiComponent());

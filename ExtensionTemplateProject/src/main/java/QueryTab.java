@@ -295,5 +295,18 @@ public class QueryTab {
         return headers + "\r\n\r\n" + body;
     }
 
+    /** Load SQL into the editor and execute it — callable from the AI Analyst tab. */
+    public void runSql(String sql) {
+        SwingUtilities.invokeLater(() -> {
+            queryInput.setText(sql);
+            runQuery();
+        });
+    }
+
+    /** Refresh the saved-queries sidebar — callable after saving a query from elsewhere. */
+    public void refreshSidebar() {
+        sidebar.refresh();
+    }
+
     public Component uiComponent() { return panel; }
 }

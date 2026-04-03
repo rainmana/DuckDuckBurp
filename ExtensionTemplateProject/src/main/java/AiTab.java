@@ -1,11 +1,14 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public class AiTab {
 
-    // Compact template — ~80 tokens vs the old ~400
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "You are a penetration testing assistant. The user captures HTTP traffic from pentest " +
             "targets into DuckDB.\n\n" +
@@ -16,15 +19,24 @@ public class AiTab {
 
     private final DuckDbManager       db;
     private final Supplier<AiBackend> backendSupplier;
+    private final Consumer<String>    runInQueryTab;   // load SQL into Query tab and run it
+    private final Runnable            sidebarRefresh;  // refresh the saved-queries sidebar
     private final JPanel              panel;
     private final JTextArea           questionArea;
     private final JTextArea           responseArea;
     private final JLabel              statusLabel;
     private final JCheckBox           includeContextCheckbox;
+    private final JPanel              suggestionRows;
+    private final JScrollPane         suggestionsScroll;
 
-    public AiTab(DuckDbManager db, Supplier<AiBackend> backendSupplier) {
+    public AiTab(DuckDbManager db,
+                 Supplier<AiBackend> backendSupplier,
+                 Consumer<String>    runInQueryTab,
+                 Runnable            sidebarRefresh) {
         this.db              = db;
         this.backendSupplier = backendSupplier;
+        this.runInQueryTab   = runInQueryTab;
+        this.sidebarRefresh  = sidebarRefresh;
 
         panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -61,9 +73,21 @@ public class AiTab {
         JScrollPane responseScroll = new JScrollPane(responseArea);
         responseScroll.setBorder(BorderFactory.createTitledBorder("AI Response"));
 
+        // ── Suggested queries panel ───────────────────────────────────────────
+        suggestionRows = new JPanel();
+        suggestionRows.setLayout(new BoxLayout(suggestionRows, BoxLayout.Y_AXIS));
+        suggestionsScroll = new JScrollPane(suggestionRows);
+        suggestionsScroll.setBorder(BorderFactory.createTitledBorder("Suggested Queries"));
+        suggestionsScroll.setPreferredSize(new Dimension(0, 160));
+        suggestionsScroll.setVisible(false);
+
+        JPanel bottomPanel = new JPanel(new BorderLayout(0, 4));
+        bottomPanel.add(responseScroll,    BorderLayout.CENTER);
+        bottomPanel.add(suggestionsScroll, BorderLayout.SOUTH);
+
         // ── Layout ────────────────────────────────────────────────────────────
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, responseScroll);
-        split.setResizeWeight(0.3);
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, bottomPanel);
+        split.setResizeWeight(0.25);
         split.setOneTouchExpandable(true);
 
         panel.add(split, BorderLayout.CENTER);
@@ -88,6 +112,7 @@ public class AiTab {
 
         statusLabel.setText("Thinking…");
         responseArea.setText("");
+        suggestionsScroll.setVisible(false);
 
         new Thread(() -> {
             try {
@@ -100,10 +125,14 @@ public class AiTab {
                         statusLabel.setText("Thinking… (~" + totalChars + " chars)"));
 
                 String response = backend.ask(systemPrompt, question);
+                List<String> sqlBlocks = AiResponseParser.extractSqlBlocks(response);
+
                 SwingUtilities.invokeLater(() -> {
                     responseArea.setText(response);
                     responseArea.setCaretPosition(0);
-                    statusLabel.setText("Done. (~" + totalChars + " chars sent)");
+                    populateSuggestions(sqlBlocks);
+                    String hint = sqlBlocks.isEmpty() ? "" : "  •  " + sqlBlocks.size() + " SQL queries detected ↓";
+                    statusLabel.setText("Done. (~" + totalChars + " chars sent)" + hint);
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -114,12 +143,100 @@ public class AiTab {
         }, "DuckDuckBurp-ai").start();
     }
 
-    /**
-     * Builds a compact plain-text traffic summary.  Intentionally terse to
-     * minimise token usage when sending to AI backends.  Package-private for tests.
-     */
+    private void populateSuggestions(List<String> queries) {
+        suggestionRows.removeAll();
+        if (queries.isEmpty()) {
+            suggestionsScroll.setVisible(false);
+            return;
+        }
+        for (String sql : queries) {
+            suggestionRows.add(buildSuggestionRow(sql));
+            suggestionRows.add(Box.createVerticalStrut(2));
+        }
+        suggestionsScroll.setVisible(true);
+        suggestionsScroll.revalidate();
+        suggestionsScroll.repaint();
+    }
+
+    private JPanel buildSuggestionRow(String sql) {
+        // One-line preview: collapse whitespace, truncate
+        String preview = sql.replaceAll("\\s+", " ").trim();
+        if (preview.length() > 110) preview = preview.substring(0, 107) + "…";
+
+        JLabel sqlLabel = new JLabel(preview);
+        sqlLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
+        sqlLabel.setForeground(Color.DARK_GRAY);
+        sqlLabel.setToolTipText("<html><pre>" + escapeHtml(sql) + "</pre></html>");
+
+        JButton runBtn  = new JButton("▶ Run");
+        JButton saveBtn = new JButton("💾 Save");
+        runBtn.setMargin(new Insets(1, 6, 1, 6));
+        saveBtn.setMargin(new Insets(1, 6, 1, 6));
+        runBtn.addActionListener(e  -> runInQueryTab.accept(sql));
+        saveBtn.addActionListener(e -> saveFromAi(sql));
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+        buttons.setOpaque(false);
+        buttons.add(runBtn);
+        buttons.add(saveBtn);
+
+        JPanel row = new JPanel(new BorderLayout(8, 0));
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(3, 6, 3, 4)));
+        row.add(sqlLabel, BorderLayout.CENTER);
+        row.add(buttons,  BorderLayout.EAST);
+        return row;
+    }
+
+    private void saveFromAi(String sql) {
+        String suggestedCategory = AiResponseParser.suggestCategory(sql);
+
+        JTextField nameField = new JTextField(28);
+        List<String> existingCats = new ArrayList<>();
+        try {
+            existingCats = db.loadSavedQueries().stream()
+                    .map(DuckDbManager.SavedQuery::category)
+                    .distinct().sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception ignored) {}
+        if (!existingCats.contains(suggestedCategory)) existingCats.add(0, suggestedCategory);
+
+        JComboBox<String> categoryBox = new JComboBox<>(existingCats.toArray(new String[0]));
+        categoryBox.setEditable(true);
+        categoryBox.setSelectedItem(suggestedCategory);
+
+        JPanel form = new JPanel(new GridLayout(2, 2, 5, 5));
+        form.add(new JLabel("Name:"));     form.add(nameField);
+        form.add(new JLabel("Category:")); form.add(categoryBox);
+
+        int result = JOptionPane.showConfirmDialog(panel, form, "Save Query",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) return;
+
+        String name     = nameField.getText().trim();
+        String category = String.valueOf(categoryBox.getSelectedItem()).trim();
+        if (name.isEmpty() || category.isEmpty()) {
+            JOptionPane.showMessageDialog(panel, "Name and category are required.",
+                    "Save Query", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                db.saveQuery(category, name, sql);
+                sidebarRefresh.run();
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                                "Save Error", JOptionPane.ERROR_MESSAGE));
+            }
+        }, "DuckDuckBurp-save-ai-query").start();
+    }
+
+    // ── Traffic summary (compact, token-efficient) ────────────────────────────
+
     static String buildTrafficSummary(DuckDbManager db) throws Exception {
-        // All scalar stats in one query
         DuckDbManager.QueryResult stats = db.query(
                 "SELECT COUNT(*) AS total, COUNT(DISTINCT host) AS hosts, " +
                 "COUNT(DISTINCT method) AS methods, " +
@@ -138,33 +255,25 @@ public class AiTab {
           .append(s[3]).append(" auth_fails | ")
           .append(s[4]).append(" server_errs\n");
 
-        // Hosts — top 5, inline
         appendCompact(sb, "hosts", db.query(
                 "SELECT host || '(' || COUNT(*) || ')' AS v FROM traffic " +
                 "GROUP BY host ORDER BY COUNT(*) DESC LIMIT 5"));
-
-        // Status codes — top 8, inline
         appendCompact(sb, "status", db.query(
                 "SELECT CAST(status_code AS VARCHAR) || '(' || COUNT(*) || ')' AS v FROM traffic " +
                 "GROUP BY status_code ORDER BY COUNT(*) DESC LIMIT 8"));
-
-        // Methods — all, inline
         appendCompact(sb, "methods", db.query(
                 "SELECT method || '(' || COUNT(*) || ')' AS v FROM traffic " +
                 "GROUP BY method ORDER BY COUNT(*) DESC"));
 
-        // Recent 10 paths — most useful context for analysis
         DuckDbManager.QueryResult recent = db.query(
                 "SELECT method, path, status_code FROM traffic ORDER BY id DESC LIMIT 10");
         if (!recent.rows().isEmpty()) {
             sb.append("recent:");
             for (Object[] row : recent.rows())
                 sb.append(" ").append(row[0]).append(" ").append(row[1]).append("→").append(row[2]).append(",");
-            // trim trailing comma
             sb.setLength(sb.length() - 1);
             sb.append("\n");
         }
-
         return sb.toString();
     }
 
@@ -173,6 +282,10 @@ public class AiTab {
         sb.append(label).append(":");
         for (Object[] row : r.rows()) sb.append(" ").append(row[0]);
         sb.append("\n");
+    }
+
+    private static String escapeHtml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     public Component uiComponent() { return panel; }
