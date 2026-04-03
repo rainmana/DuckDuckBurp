@@ -24,7 +24,15 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 tasks.named<Jar>("jar") {
+    archiveFileName.set("DuckDuckBurp.jar")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(configurations.runtimeClasspath.get().filter { it.isDirectory })
     from(configurations.runtimeClasspath.get().filterNot { it.isDirectory }.map { zipTree(it) })
+    finalizedBy("reloadJar")
+}
+
+tasks.register<Copy>("reloadJar") {
+    dependsOn(tasks.named("jar"))
+    from(tasks.named<Jar>("jar").get().archiveFile)
+    into(layout.buildDirectory.dir("burp"))
 }
