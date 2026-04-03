@@ -1,6 +1,7 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.util.function.Supplier;
 
 public class AiTab {
 
@@ -32,30 +33,25 @@ public class AiTab {
             queries the tester could run to dig deeper.
             """;
 
-    private final DuckDbManager db;
-    private final AiBackend aiBackend;
-    private final JPanel panel;
-    private final JTextArea questionArea;
-    private final JTextArea responseArea;
-    private final JLabel statusLabel;
-    private final JCheckBox includeContextCheckbox;
+    private final DuckDbManager       db;
+    private final Supplier<AiBackend> backendSupplier;
+    private final JPanel              panel;
+    private final JTextArea           questionArea;
+    private final JTextArea           responseArea;
+    private final JLabel              statusLabel;
+    private final JCheckBox           includeContextCheckbox;
 
-    public AiTab(DuckDbManager db, AiBackend aiBackend) {
-        this.db = db;
-        this.aiBackend = aiBackend;
+    /**
+     * @param db              DuckDB manager for traffic context queries
+     * @param backendSupplier evaluated fresh on every ask — changes in Settings
+     *                        take effect immediately without reloading the extension
+     */
+    public AiTab(DuckDbManager db, Supplier<AiBackend> backendSupplier) {
+        this.db              = db;
+        this.backendSupplier = backendSupplier;
 
         panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-        // ── AI availability banner ────────────────────────────────────────────
-        boolean available = aiBackend.isAvailable();
-        JLabel aiStatusLabel = new JLabel(available
-                ? "Burp AI is enabled"
-                : "Burp AI is not available — requires a Burp AI subscription");
-        aiStatusLabel.setFont(aiStatusLabel.getFont().deriveFont(Font.ITALIC));
-        aiStatusLabel.setForeground(available ? new Color(0, 128, 0) : Color.RED.darker());
-        JPanel bannerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 2));
-        bannerPanel.add(aiStatusLabel);
 
         // ── Question input ────────────────────────────────────────────────────
         questionArea = new JTextArea(5, 80);
@@ -68,9 +64,8 @@ public class AiTab {
 
         // ── Toolbar ───────────────────────────────────────────────────────────
         JButton askButton = new JButton("Ask AI");
-        askButton.setEnabled(available);
         includeContextCheckbox = new JCheckBox("Include traffic summary", true);
-        statusLabel = new JLabel(" ");
+        statusLabel = new JLabel("Configure AI backend in the Settings tab.");
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         toolbar.add(askButton);
@@ -78,9 +73,8 @@ public class AiTab {
         toolbar.add(statusLabel);
 
         JPanel topPanel = new JPanel(new BorderLayout(0, 4));
-        topPanel.add(bannerPanel,      BorderLayout.NORTH);
-        topPanel.add(questionScroll,   BorderLayout.CENTER);
-        topPanel.add(toolbar,          BorderLayout.SOUTH);
+        topPanel.add(questionScroll, BorderLayout.CENTER);
+        topPanel.add(toolbar,        BorderLayout.SOUTH);
 
         // ── Response area ─────────────────────────────────────────────────────
         responseArea = new JTextArea();
@@ -110,12 +104,13 @@ public class AiTab {
         String question = questionArea.getText().trim();
         if (question.isEmpty()) return;
 
-        if (!aiBackend.isAvailable()) {
-            statusLabel.setText("AI is not available.");
+        AiBackend backend = backendSupplier.get();
+        if (!backend.isAvailable()) {
+            statusLabel.setText("AI backend is not available — check the Settings tab.");
             return;
         }
 
-        statusLabel.setText("Thinking...");
+        statusLabel.setText("Thinking…");
         responseArea.setText("");
 
         new Thread(() -> {
@@ -124,7 +119,7 @@ public class AiTab {
                         ? buildTrafficSummary(db)
                         : "(traffic summary not included)";
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, context);
-                String response = aiBackend.ask(systemPrompt, question);
+                String response = backend.ask(systemPrompt, question);
                 SwingUtilities.invokeLater(() -> {
                     responseArea.setText(response);
                     responseArea.setCaretPosition(0);
@@ -140,11 +135,10 @@ public class AiTab {
     }
 
     /**
-     * Builds a plain-text summary of current traffic for inclusion in the AI
-     * system prompt. Package-private so it can be tested directly.
+     * Builds a plain-text traffic summary for inclusion in the AI system
+     * prompt. Package-private so it can be tested directly.
      */
     static String buildTrafficSummary(DuckDbManager db) throws Exception {
-        // Check for data first
         DuckDbManager.QueryResult overview = db.query(
                 "SELECT COUNT(*) AS total, COUNT(DISTINCT host) AS hosts, " +
                 "COUNT(DISTINCT method) AS methods FROM traffic");

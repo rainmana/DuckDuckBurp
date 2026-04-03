@@ -46,6 +46,24 @@ class AiTabTest {
     }
 
     @Test
+    void supplierIsCalledFreshOnEachAsk() throws Exception {
+        // Simulates settings changing between asks
+        AiBackend[] current = { new AiBackend() {
+            @Override public boolean isAvailable() { return true; }
+            @Override public String ask(String s, String u) { return "first"; }
+        }};
+        java.util.function.Supplier<AiBackend> supplier = () -> current[0];
+
+        assertEquals("first", supplier.get().ask("s", "u"));
+
+        current[0] = new AiBackend() {
+            @Override public boolean isAvailable() { return true; }
+            @Override public String ask(String s, String u) { return "second"; }
+        };
+        assertEquals("second", supplier.get().ask("s", "u"));
+    }
+
+    @Test
     void backendThrowsOnError() {
         AiBackend erroring = new AiBackend() {
             @Override public boolean isAvailable() { return true; }
