@@ -98,10 +98,10 @@ class AiTabTest {
 
             String summary = AiTab.buildTrafficSummary(db);
 
-            assertTrue(summary.contains("Total requests: 3"), "should show total request count");
-            assertTrue(summary.contains("Unique hosts: 2"),   "should show unique host count");
-            assertTrue(summary.contains("alpha.com"),         "should list alpha.com");
-            assertTrue(summary.contains("beta.com"),          "should list beta.com");
+            assertTrue(summary.contains("3 reqs"),   "should show total request count");
+            assertTrue(summary.contains("2 hosts"),  "should show unique host count");
+            assertTrue(summary.contains("alpha.com"), "should list alpha.com");
+            assertTrue(summary.contains("beta.com"),  "should list beta.com");
         } finally {
             db.close();
         }
@@ -133,7 +133,7 @@ class AiTabTest {
             db.insertTraffic(3L, "x.com", 80, false, "GET", "/open",   200, "{}", "", "{}", "body");
 
             String summary = AiTab.buildTrafficSummary(db);
-            assertTrue(summary.contains("Auth failures (401/403): 2"),
+            assertTrue(summary.contains("2 auth_fails"),
                     "should report both 401 and 403 as auth failures");
         } finally {
             db.close();
@@ -149,7 +149,7 @@ class AiTabTest {
             db.insertTraffic(3L, "x.com", 80, false, "GET", "/ok",    200, "{}", "", "{}", "body");
 
             String summary = AiTab.buildTrafficSummary(db);
-            assertTrue(summary.contains("Server errors (5xx): 2"),
+            assertTrue(summary.contains("2 server_errs"),
                     "should report 5xx count");
         } finally {
             db.close();

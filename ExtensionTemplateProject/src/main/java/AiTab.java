@@ -5,33 +5,14 @@ import java.util.function.Supplier;
 
 public class AiTab {
 
-    private static final String SYSTEM_PROMPT_TEMPLATE = """
-            You are a penetration testing assistant analyzing HTTP traffic captured during a security assessment.
-
-            The traffic is stored in a DuckDB database with the following schema:
-
-            Table: traffic
-              id           BIGINT    — unique request ID
-              timestamp    TIMESTAMPTZ
-              host         VARCHAR   — target hostname
-              port         INTEGER
-              protocol     VARCHAR   — 'http' or 'https'
-              method       VARCHAR   — GET, POST, PUT, DELETE, …
-              path         VARCHAR   — URL path + query string
-              status_code  INTEGER   — HTTP response status
-              req_headers  JSON
-              req_body     VARCHAR
-              resp_headers JSON
-              resp_body    VARCHAR
-              resp_length  INTEGER   — response body size in bytes
-
-            Current traffic summary:
-            %s
-
-            Provide concise, actionable security insights. Focus on findings that are \
-            genuinely useful during a pentest. When relevant, suggest specific DuckDB SQL \
-            queries the tester could run to dig deeper.
-            """;
+    // Compact template — ~80 tokens vs the old ~400
+    private static final String SYSTEM_PROMPT_TEMPLATE =
+            "You are a penetration testing assistant. The user captures HTTP traffic from pentest " +
+            "targets into DuckDB.\n\n" +
+            "Table: traffic(id BIGINT, timestamp, host, port, protocol, method, path, " +
+            "status_code INT, req_headers JSON, req_body, resp_headers JSON, resp_body, resp_length INT)\n\n" +
+            "%s\n\n" +
+            "Give concise, actionable pentest insights. Suggest DuckDB SQL queries where useful.";
 
     private final DuckDbManager       db;
     private final Supplier<AiBackend> backendSupplier;
@@ -41,11 +22,6 @@ public class AiTab {
     private final JLabel              statusLabel;
     private final JCheckBox           includeContextCheckbox;
 
-    /**
-     * @param db              DuckDB manager for traffic context queries
-     * @param backendSupplier evaluated fresh on every ask — changes in Settings
-     *                        take effect immediately without reloading the extension
-     */
     public AiTab(DuckDbManager db, Supplier<AiBackend> backendSupplier) {
         this.db              = db;
         this.backendSupplier = backendSupplier;
@@ -117,13 +93,17 @@ public class AiTab {
             try {
                 String context = includeContextCheckbox.isSelected()
                         ? buildTrafficSummary(db)
-                        : "(traffic summary not included)";
+                        : "";
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, context);
+                int totalChars = systemPrompt.length() + question.length();
+                SwingUtilities.invokeLater(() ->
+                        statusLabel.setText("Thinking… (~" + totalChars + " chars)"));
+
                 String response = backend.ask(systemPrompt, question);
                 SwingUtilities.invokeLater(() -> {
                     responseArea.setText(response);
                     responseArea.setCaretPosition(0);
-                    statusLabel.setText("Done.");
+                    statusLabel.setText("Done. (~" + totalChars + " chars sent)");
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -135,76 +115,64 @@ public class AiTab {
     }
 
     /**
-     * Builds a plain-text traffic summary for inclusion in the AI system
-     * prompt. Package-private so it can be tested directly.
+     * Builds a compact plain-text traffic summary.  Intentionally terse to
+     * minimise token usage when sending to AI backends.  Package-private for tests.
      */
     static String buildTrafficSummary(DuckDbManager db) throws Exception {
-        DuckDbManager.QueryResult overview = db.query(
+        // All scalar stats in one query
+        DuckDbManager.QueryResult stats = db.query(
                 "SELECT COUNT(*) AS total, COUNT(DISTINCT host) AS hosts, " +
-                "COUNT(DISTINCT method) AS methods FROM traffic");
-        if (overview.rows().isEmpty()) return "No traffic captured yet.";
-        long total = ((Number) overview.rows().get(0)[0]).longValue();
+                "COUNT(DISTINCT method) AS methods, " +
+                "SUM(CASE WHEN status_code IN (401,403) THEN 1 ELSE 0 END) AS auth_fails, " +
+                "SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_errs " +
+                "FROM traffic");
+        if (stats.rows().isEmpty()) return "No traffic captured yet.";
+        Object[] s = stats.rows().get(0);
+        long total = ((Number) s[0]).longValue();
         if (total == 0) return "No traffic captured yet.";
 
         StringBuilder sb = new StringBuilder();
-        Object[] ov = overview.rows().get(0);
-        sb.append("Total requests: ").append(ov[0])
-          .append(" | Unique hosts: ").append(ov[1])
-          .append(" | Methods seen: ").append(ov[2]).append("\n");
+        sb.append(total).append(" reqs | ")
+          .append(s[1]).append(" hosts | ")
+          .append(s[2]).append(" methods | ")
+          .append(s[3]).append(" auth_fails | ")
+          .append(s[4]).append(" server_errs\n");
 
-        // Top hosts
-        DuckDbManager.QueryResult hosts = db.query(
-                "SELECT host, COUNT(*) AS cnt FROM traffic " +
-                "GROUP BY host ORDER BY cnt DESC LIMIT 10");
-        if (!hosts.rows().isEmpty()) {
-            sb.append("\nTop hosts:\n");
-            for (Object[] row : hosts.rows())
-                sb.append("  ").append(row[0]).append(": ").append(row[1]).append(" requests\n");
-        }
+        // Hosts — top 5, inline
+        appendCompact(sb, "hosts", db.query(
+                "SELECT host || '(' || COUNT(*) || ')' AS v FROM traffic " +
+                "GROUP BY host ORDER BY COUNT(*) DESC LIMIT 5"));
 
-        // Status code distribution
-        DuckDbManager.QueryResult statuses = db.query(
-                "SELECT status_code, COUNT(*) AS cnt FROM traffic " +
-                "GROUP BY status_code ORDER BY cnt DESC LIMIT 15");
-        if (!statuses.rows().isEmpty()) {
-            sb.append("\nStatus codes:\n");
-            for (Object[] row : statuses.rows())
-                sb.append("  ").append(row[0]).append(": ").append(row[1]).append("\n");
-        }
+        // Status codes — top 8, inline
+        appendCompact(sb, "status", db.query(
+                "SELECT CAST(status_code AS VARCHAR) || '(' || COUNT(*) || ')' AS v FROM traffic " +
+                "GROUP BY status_code ORDER BY COUNT(*) DESC LIMIT 8"));
 
-        // Method distribution
-        DuckDbManager.QueryResult methods = db.query(
-                "SELECT method, COUNT(*) AS cnt FROM traffic " +
-                "GROUP BY method ORDER BY cnt DESC");
-        if (!methods.rows().isEmpty()) {
-            sb.append("\nMethods:\n");
-            for (Object[] row : methods.rows())
-                sb.append("  ").append(row[0]).append(": ").append(row[1]).append("\n");
-        }
+        // Methods — all, inline
+        appendCompact(sb, "methods", db.query(
+                "SELECT method || '(' || COUNT(*) || ')' AS v FROM traffic " +
+                "GROUP BY method ORDER BY COUNT(*) DESC"));
 
-        // Auth failures
-        DuckDbManager.QueryResult authFails = db.query(
-                "SELECT COUNT(*) AS cnt FROM traffic WHERE status_code IN (401, 403)");
-        if (!authFails.rows().isEmpty())
-            sb.append("\nAuth failures (401/403): ").append(authFails.rows().get(0)[0]).append("\n");
-
-        // Server errors
-        DuckDbManager.QueryResult serverErrors = db.query(
-                "SELECT COUNT(*) AS cnt FROM traffic WHERE status_code >= 500");
-        if (!serverErrors.rows().isEmpty())
-            sb.append("Server errors (5xx): ").append(serverErrors.rows().get(0)[0]).append("\n");
-
-        // Recent 30 requests for path context
+        // Recent 10 paths — most useful context for analysis
         DuckDbManager.QueryResult recent = db.query(
-                "SELECT method, path, status_code FROM traffic ORDER BY id DESC LIMIT 30");
+                "SELECT method, path, status_code FROM traffic ORDER BY id DESC LIMIT 10");
         if (!recent.rows().isEmpty()) {
-            sb.append("\nRecent requests (newest first):\n");
+            sb.append("recent:");
             for (Object[] row : recent.rows())
-                sb.append("  ").append(row[0]).append(" ").append(row[1])
-                  .append(" → ").append(row[2]).append("\n");
+                sb.append(" ").append(row[0]).append(" ").append(row[1]).append("→").append(row[2]).append(",");
+            // trim trailing comma
+            sb.setLength(sb.length() - 1);
+            sb.append("\n");
         }
 
         return sb.toString();
+    }
+
+    private static void appendCompact(StringBuilder sb, String label, DuckDbManager.QueryResult r) {
+        if (r.rows().isEmpty()) return;
+        sb.append(label).append(":");
+        for (Object[] row : r.rows()) sb.append(" ").append(row[0]);
+        sb.append("\n");
     }
 
     public Component uiComponent() { return panel; }
