@@ -1,5 +1,9 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -118,6 +122,41 @@ class DuckDbManagerTest {
             db.close();
             db.close();
         });
+    }
+
+    @Test
+    void executeRunsNonQueryStatement() throws Exception {
+        db.execute("CREATE TABLE test_exec (val VARCHAR)");
+        DuckDbManager.QueryResult result = db.query(
+                "SELECT table_name FROM information_schema.tables WHERE table_name = 'test_exec'"
+        );
+        assertEquals(1, result.rows().size());
+    }
+
+    @Test
+    void exportToCsvWritesFile(@TempDir Path tempDir) throws Exception {
+        db.insertTraffic(1L, "export.com", 80, false, "GET", "/export", 200, "{}", "", "{}", "body");
+        Path csv = tempDir.resolve("export.csv");
+        db.execute("COPY (SELECT host, method, path FROM traffic) TO '" + csv + "' (FORMAT CSV, HEADER true)");
+        assertTrue(Files.exists(csv), "CSV file should be created");
+        String content = Files.readString(csv);
+        assertTrue(content.contains("export.com"));
+        assertTrue(content.contains("host"), "CSV should have header row");
+    }
+
+    @Test
+    void exportToJsonWritesFile(@TempDir Path tempDir) throws Exception {
+        db.insertTraffic(2L, "json.com", 443, true, "POST", "/api", 201, "{}", "{}", "{}", "");
+        Path json = tempDir.resolve("export.json");
+        db.execute("COPY (SELECT host, method FROM traffic) TO '" + json + "' (FORMAT JSON)");
+        assertTrue(Files.exists(json));
+        String content = Files.readString(json);
+        assertTrue(content.contains("json.com"));
+    }
+
+    @Test
+    void executeWithInvalidSqlThrows() {
+        assertThrows(Exception.class, () -> db.execute("NOT VALID SQL AT ALL"));
     }
 
     // --- helpers ---

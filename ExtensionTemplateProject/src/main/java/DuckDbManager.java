@@ -92,6 +92,12 @@ public class DuckDbManager {
         }
     }
 
+    public synchronized void execute(String sql) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute(sql);
+        }
+    }
+
     public synchronized void close() {
         try {
             connection.close();
