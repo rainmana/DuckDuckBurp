@@ -1,0 +1,17 @@
+{"id":19,"host":"192.168.1.1","method":"GET","path":"/api/users/self","status_code":401,"resp_length":47}
+{"id":18,"host":"192.168.1.1","method":"GET","path":"/fonts/InterVariable.c504db5c06caaf7cdfba.woff2","status_code":200,"resp_length":352240}
+{"id":17,"host":"192.168.1.1","method":"GET","path":"/favicon.ico?v3","status_code":200,"resp_length":5430}
+{"id":16,"host":"192.168.1.1","method":"GET","path":"/favicon.svg?v3","status_code":200,"resp_length":1547}
+{"id":15,"host":"192.168.1.1","method":"GET","path":"/api/system","status_code":200,"resp_length":812}
+{"id":14,"host":"192.168.1.1","method":"GET","path":"/api/users/self","status_code":401,"resp_length":47}
+{"id":13,"host":"192.168.1.1","method":"GET","path":"/api/ws/webrtc/local","status_code":401,"resp_length":47}
+{"id":12,"host":"192.168.1.1","method":"GET","path":"/assets/images/1024.png?udr-3.0.0","status_code":200,"resp_length":62279}
+{"id":10,"host":"192.168.1.1","method":"GET","path":"/login","status_code":200,"resp_length":882}
+{"id":9,"host":"192.168.1.1","method":"GET","path":"/login","status_code":200,"resp_length":882}
+{"id":8,"host":"192.168.1.1","method":"GET","path":"/api/ws/webrtc/local","status_code":401,"resp_length":47}
+{"id":7,"host":"192.168.1.1","method":"GET","path":"/api/users/self","status_code":401,"resp_length":47}
+{"id":5,"host":"192.168.1.1","method":"GET","path":"/chunk-443.9ebd2207.js","status_code":200,"resp_length":799482}
+{"id":4,"host":"192.168.1.1","method":"GET","path":"/","status_code":200,"resp_length":882}
+{"id":3,"host":"192.168.1.1","method":"GET","path":"/main.adb85cdb.css","status_code":200,"resp_length":77868}
+{"id":2,"host":"192.168.1.1","method":"GET","path":"/main.622941acef7ffa4fd82b.js","status_code":200,"resp_length":7088018}
+{"id":1,"host":"192.168.1.1","method":"GET","path":"/","status_code":200,"resp_length":882}

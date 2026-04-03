@@ -1,6 +1,7 @@
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
 
+import javax.swing.*;
 import java.io.File;
 import java.nio.file.Paths;
 
@@ -17,12 +18,18 @@ public class Extension implements BurpExtension {
 
             DuckDbManager db = new DuckDbManager(dbPath);
             TrafficHandler handler = new TrafficHandler(db, montoyaApi.logging());
-            QueryTab tab = new QueryTab(db);
+            DashboardTab dashboard = new DashboardTab(db);
+            QueryTab queryTab = new QueryTab(db);
+
+            JTabbedPane tabbedPane = new JTabbedPane();
+            tabbedPane.addTab("Dashboard", dashboard.uiComponent());
+            tabbedPane.addTab("Query", queryTab.uiComponent());
 
             montoyaApi.proxy().registerResponseHandler(handler);
-            montoyaApi.userInterface().registerSuiteTab("DuckDuckBurp", tab.uiComponent());
+            montoyaApi.userInterface().registerSuiteTab("DuckDuckBurp", tabbedPane);
 
             montoyaApi.extension().registerUnloadingHandler(() -> {
+                dashboard.shutdown();
                 handler.shutdown();
                 db.close();
                 montoyaApi.logging().logToOutput("DuckDuckBurp unloaded.");
