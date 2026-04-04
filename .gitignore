@@ -1,9 +1,15 @@
 # Build output
-ExtensionTemplateProject/build/
-ExtensionTemplateProject/.gradle/
+build/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
 
 # Test export artifacts
 exported_files_tests/
+
+# Java
+*.class
+out/
+bin/
 
 # macOS
 .DS_Store
@@ -12,12 +18,28 @@ exported_files_tests/
 # Claude Code / CodeRLM internal state
 .claude/
 .coderlm/
-ExtensionTemplateProject/.coderlm/
 
-# Java
-*.class
-
-# IntelliJ / VSCode
+# IntelliJ IDEA
 .idea/
+*.iws
 *.iml
+*.ipr
+
+# Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# VS Code
 .vscode/
