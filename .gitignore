@@ -7,6 +7,12 @@ exported_files_tests/
 
 # macOS
 .DS_Store
+**/.DS_Store
+
+# Claude Code / CodeRLM internal state
+.claude/
+.coderlm/
+ExtensionTemplateProject/.coderlm/
 
 # Java
 *.class

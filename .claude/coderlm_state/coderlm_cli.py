@@ -1,1 +1,0 @@
-/Users/alec/.claude/plugins/marketplaces/coderlm/plugin//skills/coderlm/scripts/coderlm_cli.py
