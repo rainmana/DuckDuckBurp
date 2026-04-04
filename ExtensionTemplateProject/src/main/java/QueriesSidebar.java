@@ -115,6 +115,8 @@ public class QueriesSidebar {
 
     public Component uiComponent() { return panel; }
 
+    private Window frame() { return SwingUtilities.getWindowAncestor(panel); }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private void rebuildSavedSection(List<DuckDbManager.SavedQuery> queries) {
@@ -150,7 +152,7 @@ public class QueriesSidebar {
         JPopupMenu menu = new JPopupMenu();
         JMenuItem del = new JMenuItem("Delete \"" + sq.name() + "\"");
         del.addActionListener(ae -> {
-            int ok = JOptionPane.showConfirmDialog(panel,
+            int ok = JOptionPane.showConfirmDialog(frame(),
                     "Delete \"" + sq.name() + "\"?", "Delete Query", JOptionPane.YES_NO_OPTION);
             if (ok != JOptionPane.YES_OPTION) return;
             new Thread(() -> {
@@ -159,7 +161,7 @@ public class QueriesSidebar {
                     refresh();
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() ->
-                            JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                            JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                                     "Delete Error", JOptionPane.ERROR_MESSAGE));
                 }
             }, "DuckDuckBurp-delete-query").start();
@@ -172,7 +174,7 @@ public class QueriesSidebar {
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Import queries from JSON...");
         chooser.setFileFilter(new FileNameExtensionFilter("JSON files", "json"));
-        if (chooser.showOpenDialog(panel) != JFileChooser.APPROVE_OPTION) return;
+        if (chooser.showOpenDialog(frame()) != JFileChooser.APPROVE_OPTION) return;
         String path = chooser.getSelectedFile().getAbsolutePath().replace("'", "\\'");
         new Thread(() -> {
             try {
@@ -180,7 +182,7 @@ public class QueriesSidebar {
                 refresh();
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                        JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                                 "Import Error", JOptionPane.ERROR_MESSAGE));
             }
         }, "DuckDuckBurp-import").start();
@@ -191,14 +193,14 @@ public class QueriesSidebar {
         chooser.setDialogTitle("Export saved queries as JSON...");
         chooser.setFileFilter(new FileNameExtensionFilter("JSON files", "json"));
         chooser.setSelectedFile(new File("duckduckburp-queries.json"));
-        if (chooser.showSaveDialog(panel) != JFileChooser.APPROVE_OPTION) return;
+        if (chooser.showSaveDialog(frame()) != JFileChooser.APPROVE_OPTION) return;
         String path = chooser.getSelectedFile().getAbsolutePath().replace("'", "\\'");
         new Thread(() -> {
             try {
                 db.exportSavedQueries(path);
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                        JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                                 "Export Error", JOptionPane.ERROR_MESSAGE));
             }
         }, "DuckDuckBurp-export-queries").start();

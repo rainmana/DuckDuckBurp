@@ -1,3 +1,6 @@
+import com.vladsch.flexmark.html.HtmlRenderer;
+import com.vladsch.flexmark.parser.Parser;
+import com.vladsch.flexmark.util.data.MutableDataSet;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
@@ -17,23 +20,35 @@ public class AiTab {
             "%s\n\n" +
             "Give concise, actionable pentest insights. Suggest DuckDB SQL queries where useful.";
 
-    private final DuckDbManager       db;
+    private static final String RAW_CARD      = "raw";
+    private static final String RENDERED_CARD = "rendered";
+
+    private final DuckDbManager       db;          // traffic
+    private final DuckDbManager       queriesDb;   // shared saved queries
     private final Supplier<AiBackend> backendSupplier;
-    private final Consumer<String>    runInQueryTab;   // load SQL into Query tab and run it
-    private final Runnable            sidebarRefresh;  // refresh the saved-queries sidebar
+    private final Consumer<String>    runInQueryTab;
+    private final Runnable            sidebarRefresh;
     private final JPanel              panel;
     private final JTextArea           questionArea;
-    private final JTextArea           responseArea;
+    private final JTextArea           responseRaw;
+    private final JEditorPane         responseRendered;
+    private final CardLayout          responseCardLayout;
+    private final JPanel              responseCard;
+    private final JToggleButton       renderToggle;
     private final JLabel              statusLabel;
     private final JCheckBox           includeContextCheckbox;
     private final JPanel              suggestionRows;
     private final JScrollPane         suggestionsScroll;
 
+    private String lastResponseText = "";
+
     public AiTab(DuckDbManager db,
+                 DuckDbManager queriesDb,
                  Supplier<AiBackend> backendSupplier,
                  Consumer<String>    runInQueryTab,
                  Runnable            sidebarRefresh) {
         this.db              = db;
+        this.queriesDb       = queriesDb;
         this.backendSupplier = backendSupplier;
         this.runInQueryTab   = runInQueryTab;
         this.sidebarRefresh  = sidebarRefresh;
@@ -53,25 +68,48 @@ public class AiTab {
         // ── Toolbar ───────────────────────────────────────────────────────────
         JButton askButton = new JButton("Ask AI");
         includeContextCheckbox = new JCheckBox("Include traffic summary", true);
+        renderToggle = new JToggleButton("Rendered", true);
+        renderToggle.setToolTipText("Toggle between rendered markdown and raw text");
         statusLabel = new JLabel("Configure AI backend in the Settings tab.");
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         toolbar.add(askButton);
         toolbar.add(includeContextCheckbox);
+        toolbar.add(new JSeparator(SwingConstants.VERTICAL));
+        toolbar.add(renderToggle);
         toolbar.add(statusLabel);
 
         JPanel topPanel = new JPanel(new BorderLayout(0, 4));
         topPanel.add(questionScroll, BorderLayout.CENTER);
         topPanel.add(toolbar,        BorderLayout.SOUTH);
 
-        // ── Response area ─────────────────────────────────────────────────────
-        responseArea = new JTextArea();
-        responseArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        responseArea.setEditable(false);
-        responseArea.setLineWrap(true);
-        responseArea.setWrapStyleWord(true);
-        JScrollPane responseScroll = new JScrollPane(responseArea);
+        // ── Response: raw text view ───────────────────────────────────────────
+        responseRaw = new JTextArea();
+        responseRaw.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        responseRaw.setEditable(false);
+        responseRaw.setLineWrap(true);
+        responseRaw.setWrapStyleWord(true);
+        JScrollPane rawScroll = new JScrollPane(responseRaw);
+
+        // ── Response: rendered HTML view ─────────────────────────────────────
+        responseRendered = new JEditorPane("text/html", "");
+        responseRendered.setEditable(false);
+        responseRendered.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        responseRendered.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        JScrollPane renderedScroll = new JScrollPane(responseRendered);
+
+        // ── CardLayout to switch views ────────────────────────────────────────
+        responseCardLayout = new CardLayout();
+        responseCard = new JPanel(responseCardLayout);
+        responseCard.add(renderedScroll, RENDERED_CARD);
+        responseCard.add(rawScroll,      RAW_CARD);
+        responseCardLayout.show(responseCard, RENDERED_CARD);
+
+        JScrollPane responseScroll = new JScrollPane(responseCard);
         responseScroll.setBorder(BorderFactory.createTitledBorder("AI Response"));
+        // The inner scrollpanes already handle scrolling; outer is just for the border
+        responseScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        responseScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
         // ── Suggested queries panel ───────────────────────────────────────────
         suggestionRows = new JPanel();
@@ -82,8 +120,9 @@ public class AiTab {
         suggestionsScroll.setVisible(false);
 
         JPanel bottomPanel = new JPanel(new BorderLayout(0, 4));
-        bottomPanel.add(responseScroll,    BorderLayout.CENTER);
+        bottomPanel.add(responseCard,      BorderLayout.CENTER);
         bottomPanel.add(suggestionsScroll, BorderLayout.SOUTH);
+        bottomPanel.setBorder(BorderFactory.createTitledBorder("AI Response"));
 
         // ── Layout ────────────────────────────────────────────────────────────
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, bottomPanel);
@@ -98,6 +137,14 @@ public class AiTab {
         questionArea.getActionMap().put("ask", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { sendQuestion(); }
         });
+        renderToggle.addActionListener(e -> {
+            if (renderToggle.isSelected()) {
+                responseRendered.setText(markdownToHtml(lastResponseText));
+                responseCardLayout.show(responseCard, RENDERED_CARD);
+            } else {
+                responseCardLayout.show(responseCard, RAW_CARD);
+            }
+        });
     }
 
     private void sendQuestion() {
@@ -111,7 +158,9 @@ public class AiTab {
         }
 
         statusLabel.setText("Thinking…");
-        responseArea.setText("");
+        lastResponseText = "";
+        responseRaw.setText("");
+        responseRendered.setText("");
         suggestionsScroll.setVisible(false);
 
         new Thread(() -> {
@@ -128,16 +177,22 @@ public class AiTab {
                 List<String> sqlBlocks = AiResponseParser.extractSqlBlocks(response);
 
                 SwingUtilities.invokeLater(() -> {
-                    responseArea.setText(response);
-                    responseArea.setCaretPosition(0);
+                    lastResponseText = response;
+                    responseRaw.setText(response);
+                    responseRaw.setCaretPosition(0);
+                    responseRendered.setText(markdownToHtml(response));
+                    responseRendered.setCaretPosition(0);
                     populateSuggestions(sqlBlocks);
                     String hint = sqlBlocks.isEmpty() ? "" : "  •  " + sqlBlocks.size() + " SQL queries detected ↓";
                     statusLabel.setText("Done. (~" + totalChars + " chars sent)" + hint);
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
+                    String msg = "Error communicating with AI:\n\n" + ex.getMessage();
+                    lastResponseText = msg;
                     statusLabel.setText("Error: " + ex.getMessage());
-                    responseArea.setText("Error communicating with AI:\n\n" + ex.getMessage());
+                    responseRaw.setText(msg);
+                    responseRendered.setText("<html><body>" + escapeHtml(msg) + "</body></html>");
                 });
             }
         }, "DuckDuckBurp-ai").start();
@@ -159,13 +214,11 @@ public class AiTab {
     }
 
     private JPanel buildSuggestionRow(String sql) {
-        // One-line preview: collapse whitespace, truncate
         String preview = sql.replaceAll("\\s+", " ").trim();
         if (preview.length() > 110) preview = preview.substring(0, 107) + "…";
 
         JLabel sqlLabel = new JLabel(preview);
         sqlLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
-        sqlLabel.setForeground(Color.DARK_GRAY);
         sqlLabel.setToolTipText("<html><pre>" + escapeHtml(sql) + "</pre></html>");
 
         JButton runBtn  = new JButton("▶ Run");
@@ -195,7 +248,7 @@ public class AiTab {
         JTextField nameField = new JTextField(28);
         List<String> existingCats = new ArrayList<>();
         try {
-            existingCats = db.loadSavedQueries().stream()
+            existingCats = queriesDb.loadSavedQueries().stream()
                     .map(DuckDbManager.SavedQuery::category)
                     .distinct().sorted()
                     .collect(Collectors.toList());
@@ -210,28 +263,72 @@ public class AiTab {
         form.add(new JLabel("Name:"));     form.add(nameField);
         form.add(new JLabel("Category:")); form.add(categoryBox);
 
-        int result = JOptionPane.showConfirmDialog(panel, form, "Save Query",
+        int result = JOptionPane.showConfirmDialog(frame(), form, "Save Query",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (result != JOptionPane.OK_OPTION) return;
 
         String name     = nameField.getText().trim();
         String category = String.valueOf(categoryBox.getSelectedItem()).trim();
         if (name.isEmpty() || category.isEmpty()) {
-            JOptionPane.showMessageDialog(panel, "Name and category are required.",
+            JOptionPane.showMessageDialog(frame(), "Name and category are required.",
                     "Save Query", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         new Thread(() -> {
             try {
-                db.saveQuery(category, name, sql);
+                queriesDb.saveQuery(category, name, sql);
                 sidebarRefresh.run();
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                        JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                                 "Save Error", JOptionPane.ERROR_MESSAGE));
             }
         }, "DuckDuckBurp-save-ai-query").start();
+    }
+
+    // ── Markdown → HTML ───────────────────────────────────────────────────────
+
+    private static final Parser        MD_PARSER   = Parser.builder(new MutableDataSet()).build();
+    private static final HtmlRenderer  MD_RENDERER = HtmlRenderer.builder(new MutableDataSet()).build();
+
+    static String markdownToHtml(String md) {
+        if (md == null || md.isEmpty()) return "<html><body></body></html>";
+
+        Color fg = UIManager.getColor("TextArea.foreground");
+        Color bg = UIManager.getColor("TextArea.background");
+        if (fg == null) fg = Color.BLACK;
+        if (bg == null) bg = Color.WHITE;
+
+        int dr = bg.getRed()   > 128 ? -20 : 20;
+        int dg = bg.getGreen() > 128 ? -20 : 20;
+        int db = bg.getBlue()  > 128 ? -20 : 20;
+        Color codeBg = new Color(
+                Math.max(0, Math.min(255, bg.getRed()   + dr)),
+                Math.max(0, Math.min(255, bg.getGreen() + dg)),
+                Math.max(0, Math.min(255, bg.getBlue()  + db)));
+
+        String fgHex     = toHex(fg);
+        String bgHex     = toHex(bg);
+        String codeBgHex = toHex(codeBg);
+
+        String body = MD_RENDERER.render(MD_PARSER.parse(md));
+
+        return "<html><head><style>"
+             + "body{font-family:sans-serif;font-size:12pt;"
+             +      "color:" + fgHex + ";background:" + bgHex + ";margin:8px}"
+             + "pre{font-family:monospace;font-size:11pt;"
+             +     "background:" + codeBgHex + ";padding:8px;"
+             +     "white-space:pre-wrap;border-left:3px solid #888;margin:4px 0}"
+             + "code{font-family:monospace;font-size:11pt}"
+             + "h1,h2,h3{margin:6px 0 2px 0}"
+             + "p{margin:2px 0}"
+             + "li{margin:1px 0}"
+             + "</style></head><body>" + body + "</body></html>";
+    }
+
+    private static String toHex(Color c) {
+        return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
     }
 
     // ── Traffic summary (compact, token-efficient) ────────────────────────────
@@ -284,7 +381,9 @@ public class AiTab {
         sb.append("\n");
     }
 
-    private static String escapeHtml(String s) {
+    private Window frame() { return SwingUtilities.getWindowAncestor(panel); }
+
+    static String escapeHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 

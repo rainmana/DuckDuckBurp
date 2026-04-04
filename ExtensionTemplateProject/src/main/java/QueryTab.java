@@ -13,7 +13,8 @@ public class QueryTab {
 
     private static final String HINT_NO_ID = "(include 'id' in your query to see request/response detail)";
 
-    private final DuckDbManager db;
+    private final DuckDbManager db;          // traffic — runs user queries
+    private final DuckDbManager queriesDb;   // shared — saves/loads saved queries
     private final JPanel panel;
     private final JTextArea queryInput;
     private final JTable resultsTable;
@@ -23,8 +24,9 @@ public class QueryTab {
     private final JTextArea responseArea;
     private final QueriesSidebar sidebar;
 
-    public QueryTab(DuckDbManager db) {
-        this.db = db;
+    public QueryTab(DuckDbManager db, DuckDbManager queriesDb) {
+        this.db        = db;
+        this.queriesDb = queriesDb;
 
         panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -88,7 +90,7 @@ public class QueryTab {
         contentPanel.add(vertSplit, BorderLayout.CENTER);
 
         // --- Queries sidebar (canned + saved) ---
-        sidebar = new QueriesSidebar(db, sql -> { queryInput.setText(sql); runQuery(); });
+        sidebar = new QueriesSidebar(queriesDb, sql -> { queryInput.setText(sql); runQuery(); });
 
         // --- Outer split: sidebar | content ---
         JSplitPane outerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebar.uiComponent(), contentPanel);
@@ -113,7 +115,7 @@ public class QueryTab {
     private void showSaveDialog() {
         String sql = queryInput.getText().trim();
         if (sql.isEmpty()) {
-            JOptionPane.showMessageDialog(panel, "Write a query first.", "Save Query", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame(), "Write a query first.", "Save Query", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -121,7 +123,7 @@ public class QueryTab {
 
         List<String> existingCats;
         try {
-            existingCats = db.loadSavedQueries().stream()
+            existingCats = queriesDb.loadSavedQueries().stream()
                     .map(DuckDbManager.SavedQuery::category)
                     .distinct().sorted().collect(Collectors.toList());
         } catch (Exception e) {
@@ -135,24 +137,24 @@ public class QueryTab {
         form.add(new JLabel("Name:"));     form.add(nameField);
         form.add(new JLabel("Category:")); form.add(categoryBox);
 
-        int result = JOptionPane.showConfirmDialog(panel, form, "Save Query",
+        int result = JOptionPane.showConfirmDialog(frame(), form, "Save Query",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (result != JOptionPane.OK_OPTION) return;
 
         String name = nameField.getText().trim();
         String category = String.valueOf(categoryBox.getSelectedItem()).trim();
         if (name.isEmpty() || category.isEmpty()) {
-            JOptionPane.showMessageDialog(panel, "Name and category are required.", "Save Query", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame(), "Name and category are required.", "Save Query", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         new Thread(() -> {
             try {
-                db.saveQuery(category, name, sql);
+                queriesDb.saveQuery(category, name, sql);
                 sidebar.refresh();
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() ->
-                        JOptionPane.showMessageDialog(panel, ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE));
+                        JOptionPane.showMessageDialog(frame(), ex.getMessage(), "Save Error", JOptionPane.ERROR_MESSAGE));
             }
         }, "DuckDuckBurp-save-query").start();
     }
@@ -177,7 +179,7 @@ public class QueryTab {
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
                     statusLabel.setText("Error: " + ex.getMessage());
-                    JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                    JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                             "Query Error", JOptionPane.ERROR_MESSAGE);
                 });
             }
@@ -224,13 +226,13 @@ public class QueryTab {
     private void exportResults() {
         String sql = queryInput.getText().trim();
         if (sql.isEmpty()) {
-            JOptionPane.showMessageDialog(panel, "No query to export.", "Export", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame(), "No query to export.", "Export", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         String[] formats = {"CSV", "JSON", "Parquet"};
         String format = (String) JOptionPane.showInputDialog(
-                panel, "Export format:", "Export Results",
+                frame(), "Export format:", "Export Results",
                 JOptionPane.PLAIN_MESSAGE, null, formats, "CSV");
         if (format == null) return;
 
@@ -239,7 +241,7 @@ public class QueryTab {
         String ext = format.toLowerCase();
         chooser.setFileFilter(new FileNameExtensionFilter(format + " files", ext));
         chooser.setSelectedFile(new File("traffic." + ext));
-        if (chooser.showSaveDialog(panel) != JFileChooser.APPROVE_OPTION) return;
+        if (chooser.showSaveDialog(frame()) != JFileChooser.APPROVE_OPTION) return;
 
         String path = chooser.getSelectedFile().getAbsolutePath();
         String copyOptions = switch (format) {
@@ -258,7 +260,7 @@ public class QueryTab {
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
                     statusLabel.setText("Export failed.");
-                    JOptionPane.showMessageDialog(panel, ex.getMessage(),
+                    JOptionPane.showMessageDialog(frame(), ex.getMessage(),
                             "Export Error", JOptionPane.ERROR_MESSAGE);
                 });
             }
@@ -286,6 +288,8 @@ public class QueryTab {
         }
         return -1;
     }
+
+    private Window frame() { return SwingUtilities.getWindowAncestor(panel); }
 
     private String nullToEmpty(Object o) { return o == null ? "" : o.toString(); }
 
