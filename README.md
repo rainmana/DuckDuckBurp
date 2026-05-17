@@ -233,6 +233,24 @@ After each response, any SQL code blocks the AI produced appear in the **Suggest
 
 ---
 
+## Changelog
+
+### v1.0.1
+
+- Improved LiteLLM Proxy compatibility for local, Docker, and CLI-backed setups
+- Accepts either a base URL like `http://127.0.0.1:4000/v1` or a full endpoint URL
+- Automatically supports OpenAI-compatible text endpoints across `chat/completions`, `responses`, and legacy `completions`
+- Added regression tests covering endpoint selection, fallback behavior, and response parsing
+
+### v1.0.0
+
+- Initial public release of DuckDuckBurp
+- DuckDB-backed traffic capture, query UI, saved queries, dashboard, and AI Analyst tab
+
+For the full release history, see [GitHub Releases](https://github.com/rainmana/DuckDuckBurp/releases).
+
+---
+
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)
