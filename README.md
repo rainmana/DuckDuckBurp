@@ -193,11 +193,13 @@ Go to the **Settings** tab and choose an AI backend:
 
 | Field | Example |
 |---|---|
-| URL | `https://api.openai.com/v1/chat/completions` |
+| URL | `https://api.openai.com/v1` or `https://api.openai.com/v1/chat/completions` |
 | API key | `sk-…` |
 | Model | `gpt-4o-mini` |
 
-Compatible with OpenAI, Ollama (`http://localhost:11434/v1/chat/completions`), LM Studio, Azure OpenAI, and similar services.
+Compatible with OpenAI, LiteLLM (`http://127.0.0.1:4000/v1`), Ollama (`http://localhost:11434/v1`), LM Studio, Azure OpenAI, and similar services. DuckDuckBurp accepts either the API base URL or a full OpenAI-compatible text endpoint, and it can automatically use `chat/completions`, `responses`, or legacy `completions` for text-capable LiteLLM models.
+
+For LiteLLM specifically, use a text-generation model alias in the **Model** field. Embedding, image, audio, moderation, realtime, and other non-text models are not valid for the AI Analyst tab.
 
 ### Asking questions
 

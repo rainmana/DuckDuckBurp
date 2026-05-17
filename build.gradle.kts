@@ -10,6 +10,7 @@ dependencies {
     compileOnly("net.portswigger.burp.extensions:montoya-api:2026.2")
     implementation("org.duckdb:duckdb_jdbc:1.2.1")
     implementation("com.vladsch.flexmark:flexmark:0.64.8")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.18.2")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

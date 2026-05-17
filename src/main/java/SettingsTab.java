@@ -76,9 +76,9 @@ public class SettingsTab {
         GridBagConstraints fc = new GridBagConstraints();
         fc.fill = GridBagConstraints.HORIZONTAL; fc.weightx = 1; fc.insets = new Insets(4, 0, 4, 4);
 
-        lc.gridx = 0; lc.gridy = 0; formPanel.add(new JLabel("Base URL:"), lc);
+        lc.gridx = 0; lc.gridy = 0; formPanel.add(new JLabel("Endpoint URL:"), lc);
         fc.gridx = 1; fc.gridy = 0; formPanel.add(urlField, fc);
-        JLabel urlHint = new JLabel("e.g. https://api.openai.com/v1  or  http://localhost:11434/v1");
+        JLabel urlHint = new JLabel("Accepts .../v1 or a full text endpoint like .../chat/completions or .../responses");
         urlHint.setFont(urlHint.getFont().deriveFont(Font.ITALIC, 11f));
         urlHint.setForeground(Color.GRAY);
         fc.gridy = 1; formPanel.add(urlHint, fc);
